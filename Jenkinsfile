@@ -1,77 +1,51 @@
 pipeline {
   agent any
-  options {
-    // Skip the implicit SCM checkout to avoid the deprecated git whatchanged call on Windows/git 2.52+
-    skipDefaultCheckout()
-  }
+
   environment {
-    IMAGE_NAME = "flower-website"
-    IMAGE_TAG  = "${env.BUILD_NUMBER}"
-    REGISTRY   = "" // e.g. "asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/my-repo"
-    REG_CREDS  = "" // Jenkins credentials id for registry (optional)
+    EC2_USER = 'ubuntu'
+    EC2_HOST = '13.201.38.173'     // your EC2 public IP
+    WEBROOT  = '/var/www/html'
+    FILES    = 'index.html styles.css script.js' // adjust if different
   }
+
   stages {
     stage('Checkout') {
       steps {
-        // Explicit checkout with changelog/poll disabled to dodge git whatchanged
-        git changelog: false,
-            poll: false,
-            branch: 'main',
-            url: 'https://github.com/manojvistas/Flower-website.git'
+        // Use the same checkout you had
+        checkout scm
       }
     }
 
-    stage('Build Docker Image') {
+    stage('Deploy to EC2 (Windows agent)') {
       steps {
-        bat "docker build -t %IMAGE_NAME%:%IMAGE_TAG% ."
-      }
-    }
+        // This binds the SSH private key (credentials must be of type "SSH Username with private key")
+        withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'SSH_KEY')]) {
+          // Ensure Windows OpenSSH client is available on the Jenkins agent
+          powershell """
+            Write-Host "Using temporary key file: $env:SSH_KEY"
+            Write-Host "Copying files to EC2 /tmp..."
+            scp -o StrictHostKeyChecking=no -i "$env:SSH_KEY" ${FILES} ${EC2_USER}@${EC2_HOST}:/tmp/
 
-    stage('Run Tests (smoke)') {
-      steps {
-        // Stop and remove any existing container with same name
-        bat "docker rm -f %IMAGE_NAME% 2>nul || true"
-        // Run container on port 8095 for production use
-        bat """
-          docker run -d --name %IMAGE_NAME% -p 8095:8095 %IMAGE_NAME%:%IMAGE_TAG%
-        """
-        powershell '''
-          $ErrorActionPreference = "Stop"
-          Start-Sleep -Seconds 5
-          Invoke-WebRequest -UseBasicParsing "http://localhost:8095" | Out-Null
-        '''
-        bat """
-          docker logs %IMAGE_NAME%
-        """
-      }
-    }
-
-    stage('Push (optional)') {
-      when {
-        expression { return env.REGISTRY?.trim() }
-      }
-      steps {
-        bat """
-          docker login %REGISTRY% -u %REG_CREDS%
-          docker tag %IMAGE_NAME%:%IMAGE_TAG% %REGISTRY%/%IMAGE_NAME%:%IMAGE_TAG%
-          docker tag %IMAGE_NAME%:%IMAGE_TAG% %REGISTRY%/%IMAGE_NAME%:latest
-          docker push %REGISTRY%/%IMAGE_NAME%:%IMAGE_TAG%
-          docker push %REGISTRY%/%IMAGE_NAME%:latest
-        """
+            Write-Host "Moving files on EC2 and restarting nginx..."
+            ssh -o StrictHostKeyChecking=no -i "$env:SSH_KEY" ${EC2_USER}@${EC2_HOST} `
+              "sudo rm -f ${WEBROOT}/index.nginx-debian.html || true; \
+               sudo mv /tmp/index.html ${WEBROOT}/index.html || true; \
+               sudo mv /tmp/styles.css ${WEBROOT}/styles.css || true; \
+               sudo mv /tmp/script.js ${WEBROOT}/script.js || true; \
+               sudo chown -R www-data:www-data ${WEBROOT} || true; \
+               sudo systemctl restart nginx || true"
+          """
+        }
       }
     }
   }
 
   post {
-    always {
-      bat 'docker image prune -f || true'
-    }
     success {
-      echo "Build and smoke test passed."
+      echo "Deployed to http://${EC2_HOST}"
     }
     failure {
-      echo "Build failed. Check logs."
+      echo "Deployment failed — check console output"
     }
   }
 }
-
