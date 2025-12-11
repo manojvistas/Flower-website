@@ -9,29 +9,38 @@ pipeline {
   stages {
     stage('Checkout') {
       steps {
-        checkout scm
+        // Explicit checkout with changelog disabled to avoid git whatchanged on Windows/git 2.52+
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: '*/main']],
+          userRemoteConfigs: [[url: 'https://github.com/manojvistas/Flower-website.git']],
+          changelog: false,
+          poll: false
+        ])
       }
     }
 
     stage('Build Docker Image') {
       steps {
-        script {
-          dockerImage = docker.build("${IMAGE_NAME}:${IMAGE_TAG}")
-        }
+        bat "docker build -t %IMAGE_NAME%:%IMAGE_TAG% ."
       }
     }
 
     stage('Run Tests (smoke)') {
       steps {
-        script {
-          // Run container for a quick smoke-test, then curl it
-          sh """
-            docker run -d --name ${IMAGE_NAME}_test -p 8090:8090 ${IMAGE_NAME}:${IMAGE_TAG}
-            sleep 2
-            curl -f http://localhost:8090 || (docker logs ${IMAGE_NAME}_test && exit 1)
-            docker rm -f ${IMAGE_NAME}_test
-          """
-        }
+        // Run container for a quick smoke-test, hit homepage, then clean up (Windows-friendly)
+        bat """
+          docker run -d --name %IMAGE_NAME%_test -p 8090:8090 %IMAGE_NAME%:%IMAGE_TAG%
+          timeout /t 5 /nobreak >NUL
+        """
+        powershell '''
+          $ErrorActionPreference = "Stop"
+          Invoke-WebRequest -UseBasicParsing http://localhost:8090 | Out-Null
+        '''
+        bat """
+          docker logs %IMAGE_NAME%_test
+          docker rm -f %IMAGE_NAME%_test
+        """
       }
     }
 
@@ -40,19 +49,20 @@ pipeline {
         expression { return env.REGISTRY?.trim() }
       }
       steps {
-        script {
-          docker.withRegistry("https://${env.REGISTRY}", env.REG_CREDS) {
-            dockerImage.push("${IMAGE_TAG}")
-            dockerImage.push("latest")
-          }
-        }
+        bat """
+          docker login %REGISTRY% -u %REG_CREDS%
+          docker tag %IMAGE_NAME%:%IMAGE_TAG% %REGISTRY%/%IMAGE_NAME%:%IMAGE_TAG%
+          docker tag %IMAGE_NAME%:%IMAGE_TAG% %REGISTRY%/%IMAGE_NAME%:latest
+          docker push %REGISTRY%/%IMAGE_NAME%:%IMAGE_TAG%
+          docker push %REGISTRY%/%IMAGE_NAME%:latest
+        """
       }
     }
   }
 
   post {
     always {
-      sh 'docker image prune -f || true'
+      bat 'docker image prune -f || true'
     }
     success {
       echo "Build and smoke test passed."
