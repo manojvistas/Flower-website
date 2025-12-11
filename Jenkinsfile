@@ -29,18 +29,13 @@ pipeline {
     stage('Deploy to EC2 (Windows agent using key file)') {
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED, keyFileVariable: 'SSH_KEY')]) {
-          // Use single-quoted multiline string to avoid Groovy interpolation
           bat '''
             echo === verify ssh/scp availability ===
             where ssh || (echo ssh not found & exit /b 1)
             where scp || (echo scp not found & exit /b 1)
 
             echo === Fix private key permissions (determine current account and set ACL) ===
-            powershell -NoProfile -Command ^
-              "$u=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; ^
-               icacls('%SSH_KEY%') /inheritance:r | Out-Null; ^
-               icacls('%SSH_KEY%') /grant:r (\"$u:F\") | Out-Null; ^
-               Write-Output ('Set permissions on ' + '%SSH_KEY%' + ' for ' + $u)"
+            powershell -NoProfile -Command "$u = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; icacls '%SSH_KEY%' /inheritance:r | Out-Null; icacls '%SSH_KEY%' /grant:r \\\"$u:F\\\" | Out-Null; Write-Output ('Set permissions on ' + '%SSH_KEY%' + ' for ' + $u)"
 
             echo === copy files to EC2 /tmp ===
             scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" %FILES% %EC2_USER%@%EC2_HOST%:/tmp/
