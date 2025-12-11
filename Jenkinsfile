@@ -7,10 +7,10 @@ pipeline {
 
   environment {
     EC2_USER = 'ubuntu'
-    EC2_HOST = '13.201.38.173'     // update if your EC2 public IP changes
+    EC2_HOST = '13.201.38.173'
     WEBROOT  = '/var/www/html'
-    FILES    = 'index.html styles.css script.js' // adjust if filenames differ
-    SSH_CRED = 'ec2-ssh-key'       // Jenkins SSH credential id
+    FILES    = 'index.html styles.css script.js'
+    SSH_CRED = 'ec2-ssh-key'
   }
 
   stages {
@@ -29,11 +29,11 @@ pipeline {
     stage('Deploy to EC2 (Windows agent using key file)') {
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: env.SSH_CRED, keyFileVariable: 'SSH_KEY')]) {
-          // run all commands in a single bat block so %SSH_KEY% expands correctly
-          bat """
+          // Use single-quoted multiline string to avoid Groovy interpolation
+          bat '''
             echo === verify ssh/scp availability ===
-            where ssh || (echo ssh not found && exit /b 1)
-            where scp || (echo scp not found && exit /b 1)
+            where ssh || (echo ssh not found & exit /b 1)
+            where scp || (echo scp not found & exit /b 1)
 
             echo === Fix private key permissions (determine current account and set ACL) ===
             powershell -NoProfile -Command ^
@@ -46,9 +46,8 @@ pipeline {
             scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" %FILES% %EC2_USER%@%EC2_HOST%:/tmp/
 
             echo === move files on EC2 and restart nginx ===
-            ssh -o StrictHostKeyChecking=no -i "%SSH_KEY%" %EC2_USER%@%EC2_HOST% "sudo rm -f ${WEBROOT}/index.nginx-debian.html || true; sudo mv /tmp/index.html ${WEBROOT}/index.html || true; sudo mv /tmp/styles.css ${WEBROOT}/styles.css || true; sudo mv /tmp/script.js ${WEBROOT}/script.js || true; sudo chown -R www-data:www-data ${WEBROOT} || true; sudo systemctl restart nginx || true"
-
-          """
+            ssh -o StrictHostKeyChecking=no -i "%SSH_KEY%" %EC2_USER%@%EC2_HOST% "sudo rm -f %WEBROOT%/index.nginx-debian.html || true; sudo mv /tmp/index.html %WEBROOT%/index.html || true; sudo mv /tmp/styles.css %WEBROOT%/styles.css || true; sudo mv /tmp/script.js %WEBROOT%/script.js || true; sudo chown -R www-data:www-data %WEBROOT% || true; sudo systemctl restart nginx || true"
+          '''
         }
       }
     }
