@@ -29,20 +29,19 @@ pipeline {
 
     stage('Run Tests (smoke)') {
       steps {
-        // Run container for a quick smoke-test on a random free host port, then clean up
+        // Stop and remove any existing container with same name
+        bat "docker rm -f %IMAGE_NAME% 2>nul || true"
+        // Run container on port 8095 for production use
         bat """
-          for /f "delims=" %%p in ('powershell -NoProfile -Command "& { Get-Random -Minimum 20000 -Maximum 40000 }"') do set "HOST_PORT=%%p"
-          docker run -d --name %IMAGE_NAME%_test -p %HOST_PORT%:8090 %IMAGE_NAME%:%IMAGE_TAG%
+          docker run -d --name %IMAGE_NAME% -p 8095:8095 %IMAGE_NAME%:%IMAGE_TAG%
         """
         powershell '''
           $ErrorActionPreference = "Stop"
-          $port = $env:HOST_PORT
           Start-Sleep -Seconds 5
-          Invoke-WebRequest -UseBasicParsing ("http://localhost:{0}" -f $port) | Out-Null
+          Invoke-WebRequest -UseBasicParsing "http://localhost:8095" | Out-Null
         '''
         bat """
-          docker logs %IMAGE_NAME%_test
-          docker rm -f %IMAGE_NAME%_test
+          docker logs %IMAGE_NAME%
         """
       }
     }
