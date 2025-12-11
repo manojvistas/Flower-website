@@ -1,33 +1,29 @@
 pipeline {
-  agent any
-  environment {
-    IMAGE = "myuser/flower-website:${env.BUILD_NUMBER}"
-    DOCKER_CRED = 'dockerhub-creds'
-  }
-  stages {
-    stage('Checkout') {
-      steps { checkout scm }
+    agent any
+    environment {
+        IMAGE = "manojvistas/flower-website:latest"
     }
-    stage('Build') {
-      steps {
-        script {
-          docker.build("${IMAGE}")
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
-    stage('Push') {
-      steps {
-        script {
-          withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-            sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
-            sh "docker push ${IMAGE}"
-            sh "docker logout"
-          }
+
+        stage('Build Docker Image') {
+            steps {
+                bat 'docker --version'
+                bat 'docker build -t %IMAGE% .'
+            }
         }
-      }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    bat 'echo %DOCKER_PASS% | docker login -u %DOCKER_USER% --password-stdin'
+                }
+                bat 'docker push %IMAGE%'
+            }
+        }
     }
-  }
-  post {
-    always { cleanWs() }
-  }
 }
