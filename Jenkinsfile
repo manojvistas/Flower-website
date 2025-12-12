@@ -29,15 +29,28 @@ pipeline {
     stage('Deploy to EC2 (Windows agent using key file)') {
       steps {
         withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CRED}", keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
-          // Literal bat block (triple-single-quoted) avoids Groovy interpolation of $ and ${}
           bat '''
 echo === verify ssh/scp availability ===
 where ssh || (echo ssh not found & exit /b 1)
 where scp || (echo scp not found & exit /b 1)
 
-echo === Fix private key permissions (determine current account and set ACL) ===
-REM run PowerShell with a properly quoted -Command so cmd does not misinterpret pipes or Out-Null
-powershell -NoProfile -Command "$k='%SSH_KEY%'; $u=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; Write-Output ('Key path: ' + $k); Write-Output ('Running as: ' + $u); icacls $k /inheritance:r; icacls $k /grant:r \\\"$u:(F)\\\"; icacls $k"
+echo === Fix private key ACLs using cmd/icacls ===
+echo Key file: %SSH_KEY%
+echo Running as: %COMPUTERNAME%\\%USERNAME%
+
+:: remove inheritance
+icacls "%SSH_KEY%" /inheritance:r
+
+:: remove BUILTIN\Users which causes "too open" warning
+icacls "%SSH_KEY%" /remove "BUILTIN\\Users" || echo "BUILTIN\\Users removal ignored"
+
+:: grant full control to current user and to SYSTEM and Administrators
+icacls "%SSH_KEY%" /grant:r "%COMPUTERNAME%\\%USERNAME%:F" || echo "grant user failed"
+icacls "%SSH_KEY%" /grant:r "NT AUTHORITY\\SYSTEM:(F)" || echo "grant SYSTEM failed"
+icacls "%SSH_KEY%" /grant:r "BUILTIN\\Administrators:(F)" || echo "grant Administrators failed"
+
+echo === resulting ACLs ===
+icacls "%SSH_KEY%"
 
 echo === copy files to EC2 /tmp ===
 scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" %FILES% %SSH_USER%@%EC2_HOST%:/tmp/
