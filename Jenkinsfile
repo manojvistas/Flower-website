@@ -46,11 +46,12 @@ stage('Deploy to EC2 (Windows agent using key file)') {
       scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" index.html styles.css script.js %SSH_USER%@13.201.38.173:/tmp/
 
       echo === move files on EC2 and restart nginx ===
-      ssh -o StrictHostKeyChecking=no -i "%SSH_KEY%" %SSH_USER%@13.201.38.173 "sudo cp -a /var/www/html /var/www/html_backup_${env.BUILD_ID} || true; sudo mv /tmp/index.html /var/www/html/index.html || true; sudo mv /tmp/styles.css /var/www/html/styles.css || true; sudo mv /tmp/script.js /var/www/html/script.js || true; sudo chown -R www-data:www-data /var/www/html || true; sudo systemctl restart nginx || true"
+      ssh -o StrictHostKeyChecking=no -i "%SSH_KEY%" %SSH_USER%@13.201.38.173 "sudo cp -a /var/www/html /var/www/html_backup_\\$(date +%F_%T) || true; sudo mv /tmp/index.html /var/www/html/index.html || true; sudo mv /tmp/styles.css /var/www/html/styles.css || true; sudo mv /tmp/script.js /var/www/html/script.js || true; sudo chown -R www-data:www-data /var/www/html || true; sudo systemctl restart nginx || true"
       """
     }
   }
 }
+
 
 }
 
