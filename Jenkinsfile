@@ -41,7 +41,7 @@ echo Running as: %COMPUTERNAME%\\%USERNAME%
 :: remove inheritance
 icacls "%SSH_KEY%" /inheritance:r
 
-:: remove BUILTIN\Users which causes "too open" warning
+:: attempt to remove BUILTIN\Users entry (may be absent)
 icacls "%SSH_KEY%" /remove "BUILTIN\\Users" || echo "BUILTIN\\Users removal ignored"
 
 :: grant full control to current user and to SYSTEM and Administrators
