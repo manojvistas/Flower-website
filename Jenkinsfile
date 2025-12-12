@@ -28,7 +28,6 @@ pipeline {
 
     stage('Deploy to EC2 (Windows agent using key file)') {
       steps {
-        // credentialsId uses the SSH_CRED environment variable
         withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CRED}", keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
           // Literal bat block (triple-single-quoted) avoids Groovy interpolation of $ and ${}
           bat '''
@@ -37,18 +36,8 @@ where ssh || (echo ssh not found & exit /b 1)
 where scp || (echo scp not found & exit /b 1)
 
 echo === Fix private key permissions (determine current account and set ACL) ===
-powershell -NoProfile -Command ^
-  $k = '%SSH_KEY%'; ^
-  $u = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name; ^
-  Write-Output "Key path: $k"; ^
-  Write-Output "Running as: $u"; ^
-  # remove inheritance on the file
-  icacls $k /inheritance:r | Out-Null; ^
-  # grant explicit full control to the current account (handles backslash in account name)
-  icacls $k /grant:r "$u:(F)" | Out-Null; ^
-  # also grant SYSTEM just in case
-  icacls $k /grant:r "NT AUTHORITY\\SYSTEM:(F)" | Out-Null; ^
-  icacls $k
+REM run PowerShell with a properly quoted -Command so cmd does not misinterpret pipes or Out-Null
+powershell -NoProfile -Command "$k='%SSH_KEY%'; $u=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; Write-Output ('Key path: ' + $k); Write-Output ('Running as: ' + $u); icacls $k /inheritance:r; icacls $k /grant:r \\\"$u:(F)\\\"; icacls $k"
 
 echo === copy files to EC2 /tmp ===
 scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" %FILES% %SSH_USER%@%EC2_HOST%:/tmp/
