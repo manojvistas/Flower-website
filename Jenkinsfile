@@ -1,69 +1,61 @@
 pipeline {
-  agent any
+    agent any
 
-  options {
-    skipDefaultCheckout()
-  }
-
-  environment {
-    EC2_USER = 'ubuntu'
-    EC2_HOST = '13.201.38.173'
-    WEBROOT  = '/var/www/html'
-    FILES    = 'index.html styles.css script.js'
-    SSH_CRED = 'ec2-ssh-key'    // <-- update this to match your Jenkins credential id if different
-  }
-
-  stages {
-    stage('Checkout (explicit, no changelog)') {
-      steps {
-        checkout([
-          $class: 'GitSCM',
-          branches: [[name: 'refs/heads/main']],
-          doGenerateSubmoduleConfigurations: false,
-          extensions: [],
-          userRemoteConfigs: [[url: 'https://github.com/manojvistas/Flower-website.git']]
-        ])
-      }
+    environment {
+        EC2_USER = "ubuntu"
+        EC2_IP   = "13.201.38.173"
+        WEBROOT  = "/var/www/html"
     }
 
-    stage('Deploy to EC2 (Windows agent using key file)') {
-      steps {
-        withCredentials([sshUserPrivateKey(credentialsId: "${SSH_CRED}", keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
-          bat '''
-echo === verify ssh/scp availability ===
-where ssh || (echo ssh not found & exit /b 1)
-where scp || (echo scp not found & exit /b 1)
+    stages {
 
-echo === Fix private key ACLs ===
-echo Key file: %SSH_KEY%
-echo Running user: %COMPUTERNAME% %USERNAME%
-
-icacls "%SSH_KEY%" /inheritance:r
-icacls "%SSH_KEY%" /remove "BUILTIN\\Users" || echo remove ignored
-icacls "%SSH_KEY%" /grant:r "%COMPUTERNAME%\\%USERNAME%:F" || echo grant user failed
-icacls "%SSH_KEY%" /grant:r "NT AUTHORITY\\SYSTEM:(F)" || echo grant system failed
-icacls "%SSH_KEY%" /grant:r "BUILTIN\\Administrators:(F)" || echo grant admin failed
-
-echo === ACLs ===
-icacls "%SSH_KEY%"
-
-echo === copy files to EC2 /tmp ===
-scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" %FILES% %SSH_USER%@%EC2_HOST%:/tmp/
-
-echo === deploy on EC2 ===
-ssh -o StrictHostKeyChecking=no -i "%SSH_KEY%" %SSH_USER%@%EC2_HOST% "sudo cp -a ${WEBROOT} ${WEBROOT}_backup_%BUILD_ID% || true; sudo mv /tmp/index.html ${WEBROOT}/index.html || true; sudo mv /tmp/styles.css ${WEBROOT}/styles.css || true; sudo mv /tmp/script.js ${WEBROOT}/script.js || true; sudo chown -R www-data:www-data ${WEBROOT} || true; sudo systemctl restart nginx || true"
-'''
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
         }
-      }
-    }
-  }
 
-  post {
-    success {
-      echo "Deployed successfully — visit: http://${env.EC2_HOST}"
+        stage('Deploy to EC2') {
+            steps {
+                withCredentials([
+                    file(credentialsId: 'SSH_KEY_ID', variable: 'SSH_KEY')
+                ]) {
+                    bat """
+                    echo ===== Verify SSH tools =====
+                    where ssh
+                    where scp
+
+                    echo ===== Fix key permissions =====
+                    icacls "%SSH_KEY%" /inheritance:r
+                    icacls "%SSH_KEY%" /grant:r "%USERNAME%:F"
+
+                    echo ===== Copy files to EC2 =====
+                    scp -o StrictHostKeyChecking=no -i "%SSH_KEY%" ^
+                        index.html styles.css script.js ^
+                        %EC2_USER%@%EC2_IP%:/tmp/
+
+                    echo ===== Deploy on EC2 =====
+                    ssh -o StrictHostKeyChecking=no -i "%SSH_KEY%" %EC2_USER%@%EC2_IP% ^
+                    "set -e;
+                     sudo mkdir -p ${WEBROOT};
+                     sudo cp -a ${WEBROOT} ${WEBROOT}_backup_\\$(date +%s) || true;
+                     sudo mv /tmp/index.html ${WEBROOT}/index.html;
+                     sudo mv /tmp/styles.css ${WEBROOT}/styles.css;
+                     sudo mv /tmp/script.js ${WEBROOT}/script.js;
+                     sudo chown -R www-data:www-data ${WEBROOT};
+                     sudo systemctl restart nginx"
+                    """
+                }
+            }
+        }
     }
-    failure {
-      echo "Deployment failed — inspect console output for errors"
+
+    post {
+        success {
+            echo "Deployment successful — http://13.201.38.173"
+        }
+        failure {
+            echo "Deployment failed — check logs"
+        }
     }
-  }
 }
